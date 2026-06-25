@@ -66,7 +66,7 @@ Environment variables (loaded from .env if python-dotenv is installed):
   SUMO_ACCESS_KEY      Basic auth access key override ← prefer keychain
 """
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 import argparse
 import base64
@@ -870,14 +870,15 @@ def list_roles_v2(endpoint: str, auth_header: str, limit: int = 100) -> list[dic
 # Output formatting
 # ---------------------------------------------------------------------------
 
-def _print_table(rows: list[dict], columns: list[tuple[str, str]]) -> None:
+def _print_table(rows: list[dict], columns: list[tuple[str, str]], max_width: int = 40) -> None:
     if not rows:
         print("(no results)")
         return
     widths = [len(label) for label, _ in columns]
     def _cell(row, key):
         v = row.get(key)
-        return "-" if v is None else str(v)
+        s = "-" if v is None else str(v)
+        return s if len(s) <= max_width else s[: max_width - 1] + "…"
 
     for row in rows:
         for i, (_, key) in enumerate(columns):
@@ -962,12 +963,17 @@ def print_oauth_consents(consents: list[dict], fmt: str) -> None:
     if fmt == "json":
         print(json.dumps(consents, indent=2))
         return
-    _print_table(consents, [
+    rows = []
+    for c in consents:
+        row = dict(c)
+        row["_scopes"] = _fmt_scopes(c.get("scopes", []))
+        rows.append(row)
+    _print_table(rows, [
         ("Consent ID",  "id"),
         ("Client ID",   "clientId"),
         ("Client Name", "clientName"),
         ("User ID",     "userId"),
-        ("Scopes",      "scopes"),
+        ("Scopes",      "_scopes"),
         ("Created",     "createdAt"),
         ("Expires",     "expiresAt"),
     ])

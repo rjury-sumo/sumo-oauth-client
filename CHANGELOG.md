@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.8] — 2026-06-25
+
+### Fixed
+
+- **`oauth-consents` table layout** — the Scopes column dumped the raw scopes list, blowing out the column width and wrapping the whole table. It now uses the `_fmt_scopes` summary (`read, write, +N more`), consistent with `oauth-access-keys`.
+
+### Changed
+
+- **`_print_table` width cap** — table cells are now capped at 40 characters (truncated with `…`) so a single wide value can no longer break the layout. Applies to all table-format commands. Use `--output json` for full untruncated values.
+
+---
+
 ## [0.2.7] — 2026-05-19
 
 ### Added
