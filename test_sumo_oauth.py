@@ -179,30 +179,44 @@ class TestFmtScopes(unittest.TestCase):
 class TestKeychainHelpers(unittest.TestCase):
     # keyring is imported lazily inside each helper, so patch via the keyring module itself.
 
-    @patch("keyring.get_password", return_value="mysecret")
-    def test_keychain_get_returns_value(self, mock_get):
+    @patch("keyring.delete_password")
+    @patch("keyring.set_password")
+    @patch("keyring.get_password")
+    def test_keychain_get_returns_value(self, mock_get, mock_set, mock_delete):
+        # No blob entry yet; falls back to (and migrates) the legacy per-item value.
+        mock_get.side_effect = lambda service, account: (
+            None if account == so._KEYCHAIN_BLOB_ACCOUNT else "mysecret"
+        )
         result = so._keychain_get("testkey")
         self.assertEqual(result, "mysecret")
-        mock_get.assert_called_once_with(so.KEYCHAIN_SERVICE, "testkey")
+        mock_set.assert_called_once_with(
+            so.KEYCHAIN_SERVICE, so._KEYCHAIN_BLOB_ACCOUNT, json.dumps({"testkey": "mysecret"})
+        )
+        mock_delete.assert_called_once_with(so.KEYCHAIN_SERVICE, "testkey")
 
     @patch("keyring.get_password", side_effect=Exception("keychain error"))
     def test_keychain_get_returns_none_on_exception(self, _):
         result = so._keychain_get("testkey")
         self.assertIsNone(result)
 
+    @patch("keyring.get_password", return_value=None)
     @patch("keyring.set_password")
-    def test_keychain_set_returns_true(self, mock_set):
+    def test_keychain_set_returns_true(self, mock_set, _mock_get):
         result = so._keychain_set("testkey", "value")
         self.assertTrue(result)
-        mock_set.assert_called_once_with(so.KEYCHAIN_SERVICE, "testkey", "value")
+        mock_set.assert_called_once_with(
+            so.KEYCHAIN_SERVICE, so._KEYCHAIN_BLOB_ACCOUNT, json.dumps({"testkey": "value"})
+        )
 
+    @patch("keyring.get_password", return_value=None)
     @patch("keyring.set_password", side_effect=Exception("fail"))
-    def test_keychain_set_returns_false_on_exception(self, _):
+    def test_keychain_set_returns_false_on_exception(self, _mock_set, _mock_get):
         result = so._keychain_set("testkey", "value")
         self.assertFalse(result)
 
+    @patch("keyring.get_password", return_value=None)
     @patch("keyring.delete_password")
-    def test_keychain_delete_returns_true(self, _):
+    def test_keychain_delete_returns_true(self, _mock_delete, _mock_get):
         result = so._keychain_delete("testkey")
         self.assertTrue(result)
 
