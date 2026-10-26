@@ -219,33 +219,73 @@ def _keychain_available() -> bool:
         return False
 
 
-def _keychain_get(username: str) -> str | None:
+# All profiles/secrets live in one keychain item (service "sumo-oauth", account
+# below) as a JSON blob. Earlier versions stored one keychain item per
+# "{profile}:{secret}" username, which meant one macOS Keychain access-control
+# grant per profile x secret type (10-15+ separate prompts for a few profiles,
+# re-triggered every time the Python binary's code signature changes, e.g. on
+# `brew upgrade`). A single item means a single grant.
+_KEYCHAIN_BLOB_ACCOUNT = "credentials-v2"
+
+
+def _keychain_load_blob() -> dict:
     try:
         import keyring
-        return keyring.get_password(KEYCHAIN_SERVICE, username)
+        raw = keyring.get_password(KEYCHAIN_SERVICE, _KEYCHAIN_BLOB_ACCOUNT)
+        return json.loads(raw) if raw else {}
     except Exception as exc:
-        logger.debug("Keychain get failed for '%s': %s", username, exc)
+        logger.debug("Keychain blob load failed: %s", exc)
+        return {}
+
+
+def _keychain_save_blob(blob: dict) -> bool:
+    try:
+        import keyring
+        keyring.set_password(KEYCHAIN_SERVICE, _KEYCHAIN_BLOB_ACCOUNT, json.dumps(blob))
+        return True
+    except Exception as exc:
+        logger.warning("Keychain blob store failed: %s", exc)
+        return False
+
+
+def _keychain_get(username: str) -> str | None:
+    blob = _keychain_load_blob()
+    if username in blob:
+        return blob[username]
+    # One-time migration: fall back to the legacy per-secret item, pull it
+    # into the blob, and remove the old item so it stops needing its own grant.
+    try:
+        import keyring
+        legacy = keyring.get_password(KEYCHAIN_SERVICE, username)
+    except Exception as exc:
+        logger.debug("Keychain legacy get failed for '%s': %s", username, exc)
         return None
+    if legacy is not None:
+        blob[username] = legacy
+        _keychain_save_blob(blob)
+        try:
+            keyring.delete_password(KEYCHAIN_SERVICE, username)
+        except Exception as exc:
+            logger.debug("Keychain legacy cleanup failed for '%s': %s", username, exc)
+    return legacy
 
 
 def _keychain_set(username: str, secret: str) -> bool:
-    try:
-        import keyring
-        keyring.set_password(KEYCHAIN_SERVICE, username, secret)
-        return True
-    except Exception as exc:
-        logger.warning("Keychain store failed for '%s': %s", username, exc)
-        return False
+    blob = _keychain_load_blob()
+    blob[username] = secret
+    return _keychain_save_blob(blob)
 
 
 def _keychain_delete(username: str) -> bool:
+    blob = _keychain_load_blob()
+    had_entry = blob.pop(username, None) is not None
+    ok = _keychain_save_blob(blob) if had_entry else True
     try:
         import keyring
         keyring.delete_password(KEYCHAIN_SERVICE, username)
-        return True
     except Exception as exc:
-        logger.debug("Keychain delete for '%s': %s", username, exc)
-        return False
+        logger.debug("Keychain legacy delete for '%s': %s", username, exc)
+    return ok
 
 
 def _client_secret_key(profile: str) -> str:
